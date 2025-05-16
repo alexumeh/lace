@@ -1,6 +1,12 @@
 name: Horusec Analysis
 
-on: workflow_dispatch
+on:
+  workflow_dispatch:
+    inputs:
+      scan_path:
+        description: 'Path to run Horusec scan'
+        required: true
+        default: '.'
 
 jobs:
   horusec-security:
