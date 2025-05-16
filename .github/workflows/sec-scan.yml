@@ -1,0 +1,21 @@
+name: Security Analysis
+
+on:
+  workflow_dispatch:
+    inputs:
+      scan_path:
+        description: 'Path to run scan'
+        required: true
+        default: '.'
+
+permissions:
+  actions: write
+  contents: read
+  security-events: write
+  packages: read
+  pull-requests: read
+
+jobs:
+  code-scan-analysis:
+    name: Code Scan Analysis
+    uses: alexumeh/lace/.github/workflows/sec-scan-workflow.yml@main
