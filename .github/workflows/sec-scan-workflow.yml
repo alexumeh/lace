@@ -1,0 +1,206 @@
+name: "Run Code Security Scan"
+
+on:
+  workflow_call:
+
+permissions:
+  actions: write
+  contents: read
+  security-events: write
+  packages: read
+  pull-requests: read
+  statuses: none
+
+jobs:
+  ########################################################################
+  # 1) SUPER LINTER JOB
+  ########################################################################
+  super-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          # Fetch all history so Super Linter can identify correct commit
+          fetch-depth: 0
+
+      - name: Lint
+        uses: super-linter/super-linter@v7.2.1
+        env:
+          # Required so Super Linter can report PR status checks
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Only lint changed files (PR) or entire codebase if needed
+          VALIDATE_ALL_CODEBASE: false
+          # Don't fail the job on lint errors
+          DISABLE_ERRORS: true
+          # Disable JSCPD in Super-Linter to avoid duplication
+          VALIDATE_JSCPD: false
+          # Enable detailed output and specify a folder for reports
+          OUTPUT_DETAILS: detailed
+          REPORT_OUTPUT_FOLDER: super_linter_reports
+
+      - name: Generate Super-Linter summary
+        # Always run so the summary is produced even if lint fails
+        if: always()
+        run: |
+          echo "## Super-Linter Summary" >> $GITHUB_STEP_SUMMARY
+
+          # This file name may differ depending on the Super Linter version:
+          # Adjust if your version creates a different name.
+          if [ -f super_linter_reports/super_linter_report.md ]; then
+            cat super_linter_reports/super_linter_report.md >> $GITHUB_STEP_SUMMARY
+          else
+            echo "No Super Linter report found." >> $GITHUB_STEP_SUMMARY
+          fi
+
+  ########################################################################
+  # 2) DETECT LANGUAGES FROM PR CHANGES (IF PR) OR FROM REPO (IF NOT)
+  ########################################################################
+  detect_repo_languages:
+    needs: super-lint
+    runs-on: ubuntu-latest
+    outputs:
+      languages: ${{ steps.detect_langs.outputs.languages }}
+      filtered_languages: ${{ steps.detect_langs.outputs.filtered_languages }}
+      not_supported_languages: ${{ steps.detect_langs.outputs.not_supported_languages }}
+    steps:
+      - name: Detect and Filter Programming Languages
+        id: detect_langs
+        run: |
+          # If this workflow is triggered by a pull_request event, detect
+          # languages by changed files. Otherwise, detect from the entire repo.
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            echo "Detecting languages from the PR changes..."
+
+            # Get the list of changed files in the PR
+            pr_files=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+              https://api.github.com/repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files)
+
+            # Extract file extensions from changed files, convert to lowercase
+            detected_pr_langs=$(echo "$pr_files" | jq -r '.[].filename | split(".") | .[-1] | ascii_downcase' | sort -u)
+            echo "Detected file extensions from PR: $detected_pr_langs"
+
+            # Map extensions to CodeQL language names
+            declare -A ext_to_lang=( 
+              ["js"]="javascript" 
+              ["ts"]="typescript" 
+              ["py"]="python" 
+              ["rb"]="ruby" 
+              ["java"]="java" 
+              ["cs"]="csharp" 
+              ["cpp"]="cpp" 
+              ["c"]="cpp" 
+              ["hpp"]="cpp" 
+              ["h"]="cpp" 
+              ["go"]="go" 
+            )
+
+            # Build a JSON array of detected languages
+            detected_langs=$(echo "$detected_pr_langs" | while read ext; do 
+              lang=${ext_to_lang[$ext]} 
+              if [ -n "$lang" ]; then 
+                echo "$lang" 
+              fi 
+            done | sort -u | jq -R . | jq -s .)
+
+          else
+            echo "Detecting languages from the entire repository..."
+            detected_langs=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+              https://api.github.com/repos/${{ github.repository }}/languages \
+              | jq -c 'keys | map(. | ascii_downcase) | .')
+          fi
+
+          echo "Detected languages: $detected_langs"
+
+          # Define CodeQL-supported languages
+          codeql_langs='["cpp", "csharp", "go", "java", "javascript", "python", "ruby", "typescript"]'
+
+          # Filter the detected languages to include only CodeQL-supported ones
+          filtered_langs=$(echo "$detected_langs" | jq -c --argjson codeql "$codeql_langs" '[.[] | select(. as $lang | $codeql | index($lang))]')
+
+          # Also compute the difference = languages not supported by CodeQL
+          not_supported_langs=$(jq -c --argjson codeql "$codeql_langs" '[.[] | select(. as $lang | $codeql | index($lang) | not )]' <<< "$detected_langs")
+
+          echo "Filtered (CodeQL) languages: $filtered_langs"
+          echo "Not supported by CodeQL: $not_supported_langs"
+
+          # Output them as JSON strings
+          echo "languages=$(echo "$detected_langs" | jq -c .)" >> $GITHUB_OUTPUT
+          echo "filtered_languages=$(echo "$filtered_langs" | jq -c .)" >> $GITHUB_OUTPUT
+          echo "not_supported_languages=$(echo "$not_supported_langs" | jq -c .)" >> $GITHUB_OUTPUT
+
+  # ########################################################################
+  # # 4) CODEQL SCAN (for languages supported by CodeQL)
+  # ########################################################################
+  # codeql-scan:
+  #   needs: detect_repo_languages
+  #   name: "CodeQL Analyze (${{ matrix.language }})"
+  #   runs-on: ubuntu-latest
+  #   if: needs.detect_repo_languages.outputs.filtered_languages != '[]'
+  #   permissions:
+  #     security-events: write
+  #     packages: read
+  #     actions: read
+  #     contents: read
+  #   strategy:
+  #     fail-fast: false
+  #     matrix:
+  #       language: ${{ fromJson(needs.detect_repo_languages.outputs.filtered_languages) }}
+  #   steps:
+  #     - name: Checkout repository
+  #       uses: actions/checkout@v4
+
+  #     - name: Initialize CodeQL
+  #       uses: github/codeql-action/init@v3
+  #       with:
+  #         languages: ${{ matrix.language }}
+  #         build-mode: none
+  #         queries: security-and-quality
+
+  #     - name: Perform CodeQL Analysis
+  #       uses: github/codeql-action/analyze@v3
+  #       with:
+  #         category: "/language:${{ matrix.language }}"
+
+  ########################################################################
+  # 5) HORUSEC SCAN (for languages not supported by CodeQL)
+  ########################################################################
+  horusec-scan:
+    needs: detect_repo_languages
+    runs-on: ubuntu-latest
+    if: needs.detect_repo_languages.outputs.not_supported_languages != '[]'
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Horusec
+        run: |
+          echo "Installing Horusec CLI..."
+          curl -fsSL https://raw.githubusercontent.com/ZupIT/horusec/main/deployments/scripts/install.sh | bash -s latest
+
+      - name: Run Horusec Scan
+        run: |
+          echo "Running Horusec Scan for non-CodeQL-supported languages..."
+          horusec start -p . -D -o="sarif" -O="./horusec.sarif"
+
+      - name: Upload Horusec SARIF to GitHub
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: ./horusec.sarif
+          category: Horusec
+        continue-on-error: true
+
+  ########################################################################
+  # 6) SECURITY POST CHECK
+  ########################################################################
+  security-post-check:
+    needs:
+      - super-lint
+      # - codeql-scan
+      - horusec-scan
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Validate Scans
+        run: |
+          echo "Security and linting checks done. See logs above for details."
