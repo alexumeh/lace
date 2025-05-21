@@ -132,35 +132,35 @@ jobs:
   # ########################################################################
   # # 4) CODEQL SCAN (for languages supported by CodeQL)
   # ########################################################################
-  # codeql-scan:
-  #   needs: detect_repo_languages
-  #   name: "CodeQL Analyze (${{ matrix.language }})"
-  #   runs-on: ubuntu-latest
-  #   if: needs.detect_repo_languages.outputs.filtered_languages != '[]'
-  #   permissions:
-  #     security-events: write
-  #     packages: read
-  #     actions: read
-  #     contents: read
-  #   strategy:
-  #     fail-fast: false
-  #     matrix:
-  #       language: ${{ fromJson(needs.detect_repo_languages.outputs.filtered_languages) }}
-  #   steps:
-  #     - name: Checkout repository
-  #       uses: actions/checkout@v4
+  codeql-scan:
+    needs: detect_repo_languages
+    name: "CodeQL Analyze (${{ matrix.language }})"
+    runs-on: ubuntu-latest
+    if: needs.detect_repo_languages.outputs.filtered_languages != '[]'
+    permissions:
+      security-events: write
+      packages: read
+      actions: read
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        language: ${{ fromJson(needs.detect_repo_languages.outputs.filtered_languages) }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-  #     - name: Initialize CodeQL
-  #       uses: github/codeql-action/init@v3
-  #       with:
-  #         languages: ${{ matrix.language }}
-  #         build-mode: none
-  #         queries: security-and-quality
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: none
+          queries: security-and-quality
 
-  #     - name: Perform CodeQL Analysis
-  #       uses: github/codeql-action/analyze@v3
-  #       with:
-  #         category: "/language:${{ matrix.language }}"
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:${{ matrix.language }}"
 
   ########################################################################
   # 5) HORUSEC SCAN (for languages not supported by CodeQL)
@@ -196,7 +196,7 @@ jobs:
   security-post-check:
     needs:
       - super-lint
-      # - codeql-scan
+      - codeql-scan
       - horusec-scan
     runs-on: ubuntu-latest
     if: always()
