@@ -1,12 +1,12 @@
 name: Continuous Integration
 
-on:
-  pull_request:
-    types: [opened, synchronize, reopened, ready_for_review]
-  push:
-    branches:
-      - main
-      - 'release/**'
+# on:
+#   pull_request:
+#     types: [opened, synchronize, reopened, ready_for_review]
+#   push:
+#     branches:
+#       - main
+#       - 'release/**'
 
 permissions:
   pull-requests: write
