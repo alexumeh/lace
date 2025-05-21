@@ -1,11 +1,11 @@
 name: Chromatic deploy packages/core
 
-on:
-  pull_request:
-    types: [opened, synchronize, reopened, ready_for_review]
-  push:
-    branches:
-      - main
+# on:
+#   pull_request:
+#     types: [opened, synchronize, reopened, ready_for_review]
+#   push:
+#     branches:
+#       - main
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
