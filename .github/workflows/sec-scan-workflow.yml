@@ -189,15 +189,90 @@ jobs:
           sarif_file: ./horusec.sarif
           category: Horusec
         continue-on-error: true
+  ########################################################################
+  # 6) Sonarcloud scan
+  ########################################################################
+  sonarqube:
+    name: SonarQube
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Shallow clones should be disabled for a better relevancy of analysis
+      - name: SonarQube Scan
+        uses: SonarSource/sonarqube-scan-action@v5
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
 
   ########################################################################
-  # 6) SECURITY POST CHECK
+  # 7) Trivvy Scan
+  ########################################################################
+  trivvy:
+    name: Trivvy
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # - name: Build an image from Dockerfile
+      #   run: |
+      #     docker build -t docker.io/my-organization/my-app:${{ github.sha }} .
+
+      # - name: Run Trivy vulnerability scanner
+      #   uses: aquasecurity/trivy-action@0.28.0
+      #   with:
+      #     image-ref: 'docker.io/my-organization/my-app:${{ github.sha }}'
+      #     format: 'sarif'
+      #     output: 'trivy-results.sarif'
+
+
+      - name: Run Trivy vulnerability scanner in repo mode
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: 'fs'
+          ignore-unfixed: true
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+          # severity: 'CRITICAL'
+
+      - name: Upload Trivy scan results to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: 'trivy-results.sarif'
+  
+  ########################################################################
+  # 8) SECURITY POST CHECK
+  ########################################################################
+  trufflehog:
+    name: trufflehog
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+    - name: Secret Scanning
+      uses: trufflesecurity/trufflehog@main
+      with:
+        extra_args: --results=verified,unknown
+    - name: scan-push
+      uses: trufflesecurity/trufflehog@main
+      with:
+        base: ""
+        head: ${{ github.ref_name }}
+        extra_args: --results=verified,unknown
+
+  ########################################################################
+  # 9) SECURITY POST CHECK
   ########################################################################
   security-post-check:
     needs:
       - super-lint
       - codeql-scan
       - horusec-scan
+      - sonarqube
+      - trivvy
+      - trufflehog
     runs-on: ubuntu-latest
     if: always()
     steps:
