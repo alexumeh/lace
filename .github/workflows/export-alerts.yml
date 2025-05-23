@@ -1,0 +1,13 @@
+on: workflow_dispatch
+
+jobs:
+  export_security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: advanced-security/ghas-to-csv@v3
+        env:
+          GITHUB_PAT: ${{ secrets.PAT }}    # needs security_events or repo scope
+      - uses: actions/upload-artifact@v4
+        with:
+          name: security-data
+          path: '*.csv'
